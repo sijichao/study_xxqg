@@ -1,66 +1,58 @@
 package lib
 
 import (
-	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
-	"github.com/guonaihong/gout"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
+
+	"github.com/johlanse/study_xxqg/utils"
 )
 
 type Score struct {
-	TotalScore int
-	TodayScore int
-	Content    map[string]Data
+	TotalScore int             `json:"total_score"`
+	TodayScore int             `json:"today_score"`
+	Content    map[string]Data `json:"content"`
 }
 
 type Data struct {
-	CurrentScore int
-	MaxScore     int
+	CurrentScore int `json:"current_score"`
+	MaxScore     int `json:"max_score"`
 }
 
-func GetUserScore(cookies []Cookie) (Score, error) {
+func GetUserScore(cookies []*http.Cookie) (Score, error) {
 	var score Score
 	var resp []byte
-	// 获取用户总分
-	err := gout.GET(user_totalScore_url).SetCookies(cookieToJar(cookies)...).SetHeader(gout.H{
+
+	header := map[string]string{
 		"Cache-Control": "no-cache",
-	}).BindBody(&resp).Do()
+	}
+
+	client := utils.GetClient()
+	response, err := client.R().SetCookies(cookies...).SetHeaders(header).Get(userTotalscoreUrl)
 	if err != nil {
 		log.Errorln("获取用户总分错误" + err.Error())
-
 		return Score{}, err
 	}
-	data := string(resp)
-	log.Infoln(data)
-	if !gjson.GetBytes(resp, "ok").Bool() {
-		return Score{}, errors.New("token check failed")
-	}
-	log.Debugln(gjson.GetBytes(resp, "@this|@pretty"))
+	resp = response.Bytes()
 	score.TotalScore = int(gjson.GetBytes(resp, "data.score").Int())
 
-	// 获取用户今日得分
-	err = gout.GET(user_todayTotalScore_url).SetCookies(cookieToJar(cookies)...).SetHeader(gout.H{
-		"Cache-Control": "no-cache",
-	}).BindBody(&resp).Do()
+	response, err = client.R().SetCookies(cookies...).SetHeaders(header).Get(userTodaytotalscoreUrl)
 	if err != nil {
-		log.Errorln("获取用户每日总分错误" + err.Error())
-
+		log.Errorln("获取用户总分错误" + err.Error())
 		return Score{}, err
 	}
-	log.Debugln(gjson.GetBytes(resp, "@this|@pretty"))
+	resp = response.Bytes()
 	score.TodayScore = int(gjson.GetBytes(resp, "data.score").Int())
 
-	err = gout.GET(user_rateScore_url).SetCookies(cookieToJar(cookies)...).SetHeader(gout.H{
-		"Cache-Control": "no-cache",
-	}).BindBody(&resp).Do()
+	response, err = client.R().SetCookies(cookies...).SetHeaders(header).Get(userRatescoreUrl)
 	if err != nil {
-		log.Errorln("获取用户积分出现错误" + err.Error())
+		log.Errorln("获取用户总分错误" + err.Error())
 		return Score{}, err
 	}
-	log.Debugln(gjson.GetBytes(resp, "@this|@pretty"))
+	resp = response.Bytes()
 	datas := gjson.GetBytes(resp, "data.taskProgress").Array()
 	m := make(map[string]Data, 7)
 	m["article"] = Data{
@@ -99,8 +91,8 @@ func GetUserScore(cookies []Cookie) (Score, error) {
 
 func PrintScore(score Score) string {
 	result := ""
-	result += fmt.Sprintf("当前学习总积分：%d  今日得分：%d\n", score.TotalScore, score.TodayScore)
-	result += fmt.Sprintf("[%v] [INFO]: 登录：%v/%v  文章学习：%v/%v  视频学习：%v/%v  视频时长：%v/%v\n[%v] [INFO]: 每日答题：%v/%v  每周答题：%v/%v   专项答题：%v/%v",
+	result += fmt.Sprintf("当前学习总积分：%d\n今日得分：%d\n", score.TotalScore, score.TodayScore)
+	result += fmt.Sprintf("[%v] [INFO]: 登录：%v/%v\n文章学习：%v/%v\n视频学习：%v/%v\n视频时长：%v/%v\n[%v] [INFO]: 每日答题：%v/%v\n每周答题：%v/%v\n专项答题：%v/%v",
 		time.Now().Format("2006-01-02 15:04:05"),
 		score.Content["login"].CurrentScore, score.Content["login"].MaxScore,
 		score.Content["article"].CurrentScore, score.Content["article"].MaxScore,
@@ -115,10 +107,25 @@ func PrintScore(score Score) string {
 	return result
 }
 
-func foramet_score(score Score) string {
+func FormatScore(score Score) string {
 	result := ""
-	result += fmt.Sprintf("当前学习总积分：%d  今日得分：%d\n", score.TotalScore, score.TodayScore)
-	result += fmt.Sprintf("登录：%v/%v  文章学习：%v/%v  视频学习：%v/%v  视频时长：%v/%v\n每日答题：%v/%v  每周答题：%v/%v   专项答题：%v/%v",
+	result += fmt.Sprintf("当前学习总积分：%d\n今日得分：%d\n", score.TotalScore, score.TodayScore)
+	result += fmt.Sprintf("登录：%v/%v\n文章学习：%v/%v\n视频学习：%v/%v\n视频时长：%v/%v\n每日答题：%v/%v\n每周答题：%v/%v\n专项答题：%v/%v",
+		score.Content["login"].CurrentScore, score.Content["login"].MaxScore,
+		score.Content["article"].CurrentScore, score.Content["article"].MaxScore,
+		score.Content["video"].CurrentScore, score.Content["video"].MaxScore,
+		score.Content["video_time"].CurrentScore, score.Content["video_time"].MaxScore,
+		score.Content["daily"].CurrentScore, score.Content["daily"].MaxScore,
+		score.Content["weekly"].CurrentScore, score.Content["weekly"].MaxScore,
+		score.Content["special"].CurrentScore, score.Content["special"].MaxScore,
+	)
+	return result
+}
+
+func FormatScoreShort(score Score) string {
+	result := ""
+	result += fmt.Sprintf("当前学习总积分：%d\n今日得分：%d\n", score.TotalScore, score.TodayScore)
+	result += fmt.Sprintf("登录：%v/%v\n文章学习：%v/%v\n视频学习：%v/%v\n视频时长：%v/%v\n每日答题：%v/%v\n每周答题：%v/%v\n专项答题：%v/%v",
 		score.Content["login"].CurrentScore, score.Content["login"].MaxScore,
 		score.Content["article"].CurrentScore, score.Content["article"].MaxScore,
 		score.Content["video"].CurrentScore, score.Content["video"].MaxScore,

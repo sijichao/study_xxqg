@@ -11,19 +11,21 @@ builds:
       - GO111MODULE=on
     goos:
       - linux
-#      - darwin
+      - darwin
     goarch:
       - 386
       - amd64
-#      - arm
-#      - arm64
-#    goarm:
-#      - 7
-#    ignore:
-#      - goos: darwin
-#        goarch: arm
-#      - goos: darwin
-#        goarch: 386
+      - arm
+      - arm64
+    goarm:
+      - 7
+    ignore:
+      - goos: darwin
+        goarch: arm
+      - goos: darwin
+        goarch: 386
+      - goos: windows
+        goarch: arm
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
       - -trimpath
@@ -38,9 +40,22 @@ builds:
     goarch:
       - 386
       - amd64
-#      - arm
     goarm:
       - 7
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.VERSION=v{{.Version}}
+  - id: docker
+    env:
+      - CGO_ENABLED=0
+      - GO111MODULE=on
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
       - -trimpath
@@ -65,12 +80,9 @@ archives:
   - id: binary
     builds:
       - win
-      - nowin
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
     format_overrides:
       - goos: windows
-        format: binary
-      - goos: linux
         format: binary
   - id: nowin
     builds:
@@ -88,4 +100,7 @@ nfpms:
     formats:
       - deb
       - rpm
-    maintainer: HuoXue1
+    maintainer: johlanse
+    builds:
+      - nowin
+      - win

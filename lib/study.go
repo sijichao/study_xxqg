@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/guonaihong/gout"
-	"github.com/mxschmitt/playwright-go"
+	"github.com/playwright-community/playwright-go"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/johlanse/study_xxqg/model"
+	"github.com/johlanse/study_xxqg/utils"
 )
 
 var (
@@ -71,11 +73,12 @@ func getLinks(model string) ([]Link, error) {
 		resp []byte
 	)
 
-	err := gout.GET(learnUrl + "?_st=" + strconv.Itoa(UID)).BindBody(&resp).Do()
+	response, err := utils.GetClient().R().SetQueryParam("_st", strconv.Itoa(UID)).Get(learnUrl)
 	if err != nil {
-		log.Errorln("请求连接列表出现错误" + err.Error())
+		log.Errorln("请求链接列表出现错误！" + err.Error())
 		return nil, err
 	}
+	resp = response.Bytes()
 
 	var links []Link
 	err = json.Unmarshal(resp, &links)
@@ -86,7 +89,13 @@ func getLinks(model string) ([]Link, error) {
 	return links, err
 }
 
-func (c *Core) LearnArticle(cookies []Cookie) {
+// LearnArticle
+/**
+ * @Description: 文章学习
+ * @receiver c
+ * @param cookies
+ */
+func (c *Core) LearnArticle(user *model.User) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -98,7 +107,7 @@ func (c *Core) LearnArticle(cookies []Cookie) {
 		return
 	}
 
-	score, err := GetUserScore(cookies)
+	score, err := GetUserScore(user.ToCookies())
 	if err != nil {
 		log.Errorln(err.Error())
 		return
@@ -106,16 +115,44 @@ func (c *Core) LearnArticle(cookies []Cookie) {
 	links, _ := getLinks("article")
 	if score.Content["article"].CurrentScore < score.Content["article"].MaxScore {
 		log.Infoln("开始加载文章学习模块")
-		page, err := (*c.context).NewPage()
+
+		context, err := c.browser.NewContext(playwright.BrowserNewContextOptions{
+			Viewport: &playwright.BrowserNewContextOptionsViewport{
+				Width:  playwright.Int(1920),
+				Height: playwright.Int(1080),
+			}})
+		_ = context.AddInitScript(playwright.BrowserContextAddInitScriptOptions{
+			Script: playwright.String("Object.defineProperties(navigator, {webdriver:{get:()=>undefined}});")})
 		if err != nil {
+			log.Errorln("创建实例对象错误" + err.Error())
 			return
 		}
 
-		err = (*c.context).AddCookies(cookieToParam(cookies)...)
+		defer func(context playwright.BrowserContext) {
+			err := context.Close()
+			if err != nil {
+				log.Errorln("错误的关闭了实例对象" + err.Error())
+			}
+		}(context)
+
+		page, err := context.NewPage()
+		if err != nil {
+			return
+		}
+		defer func() {
+			err := page.Close()
+			if err != nil {
+				log.Errorln("关闭页面失败")
+				return
+			}
+		}()
+
+		err = context.AddCookies(user.ToBrowserCookies()...)
 		if err != nil {
 			log.Errorln("添加cookie失败" + err.Error())
 			return
 		}
+
 		tryCount := 0
 
 		for {
@@ -131,10 +168,10 @@ func (c *Core) LearnArticle(cookies []Cookie) {
 					log.Errorln("页面跳转失败")
 				}
 				log.Infoln("正在学习文章：" + links[n].Title)
-				c.Push("text", "正在学习文章："+links[n].Title)
+				c.Push(user.PushId, "text", "正在学习文章："+links[n].Title)
 				log.Infoln("文章发布时间：" + links[n].PublishTime)
 				log.Infoln("文章学习链接：" + links[n].Url)
-				learnTime := 70 + rand.Intn(30) + 10
+				learnTime := 60 + rand.Intn(15) + 3
 				for i := 0; i < learnTime; i++ {
 					if c.IsQuit() {
 						return
@@ -152,15 +189,16 @@ func (c *Core) LearnArticle(cookies []Cookie) {
 					time.Sleep(1 * time.Second)
 				}
 				fmt.Println()
-
+				score, _ = GetUserScore(user.ToCookies())
 				if score.Content["article"].CurrentScore >= score.Content["article"].MaxScore {
 					log.Infoln("检测到本次阅读学习分数已满，退出学习")
 					break
 				}
-				score, _ = GetUserScore(cookies)
+
 				tryCount++
 			} else {
 				log.Errorln("阅读学习出现异常，稍后可重新学习")
+				return
 			}
 		}
 	} else {
@@ -168,7 +206,13 @@ func (c *Core) LearnArticle(cookies []Cookie) {
 	}
 }
 
-func (c *Core) LearnVideo(cookies []Cookie) {
+// LearnVideo
+/**
+ * @Description: 视频学习
+ * @receiver c
+ * @param cookies
+ */
+func (c *Core) LearnVideo(user *model.User) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -179,41 +223,49 @@ func (c *Core) LearnVideo(cookies []Cookie) {
 	if c.IsQuit() {
 		return
 	}
-	score, err := GetUserScore(cookies)
+	score, err := GetUserScore(user.ToCookies())
 	if err != nil {
 		log.Errorln(err.Error())
 		return
 	}
 	links, _ := getLinks("video")
-	if score.Content["video"].CurrentScore < score.Content["video"].MaxScore || score.Content["video_time"].CurrentScore < score.Content["video_time"].MaxScore {
+	if !(score.Content["video"].CurrentScore >= score.Content["video"].MaxScore && score.Content["video_time"].CurrentScore >= score.Content["video_time"].MaxScore) {
 		log.Infoln("开始加载视频学习模块")
 		// core := Core{}
-		//core.Init()
+		// core.Init()
 
-		page, err := (*c.context).NewPage()
+		context, err := c.browser.NewContext(playwright.BrowserNewContextOptions{
+			Viewport: &playwright.BrowserNewContextOptionsViewport{
+				Width:  playwright.Int(1920),
+				Height: playwright.Int(1080),
+			}})
+		_ = context.AddInitScript(playwright.BrowserContextAddInitScriptOptions{
+			Script: playwright.String("Object.defineProperties(navigator, {webdriver:{get:()=>undefined}});")})
 		if err != nil {
+			log.Errorln("创建实例对象错误" + err.Error())
 			return
 		}
+		defer func(context playwright.BrowserContext) {
+			err := context.Close()
+			if err != nil {
+				log.Errorln("错误的关闭了实例对象" + err.Error())
+			}
+		}(context)
 
-		var resp string
-		err = gout.GET("http://1.15.144.22/stealth.min.js").BindBody(&resp).Do()
+		page, err := context.NewPage()
 		if err != nil {
 			return
 		}
-		err = page.AddInitScript(playwright.PageAddInitScriptOptions{
-			Script: playwright.String(resp),
-			Path:   nil,
-		})
-		if err != nil {
-			return
-		}
-		err = (*c.context).AddCookies(cookieToParam(cookies)...)
+		defer func() {
+			page.Close()
+		}()
+
+		err = context.AddCookies(user.ToBrowserCookies()...)
 		if err != nil {
 			log.Errorln("添加cookie失败" + err.Error())
 			return
 		}
 		tryCount := 0
-
 		for {
 			if tryCount < 20 {
 				PrintScore(score)
@@ -227,10 +279,10 @@ func (c *Core) LearnVideo(cookies []Cookie) {
 					log.Errorln("页面跳转失败")
 				}
 				log.Infoln("正在观看视频：" + links[n].Title)
-				c.Push("text", "正在观看视频："+links[n].Title)
+				c.Push(user.PushId, "text", "正在观看视频："+links[n].Title)
 				log.Infoln("视频发布时间：" + links[n].PublishTime)
 				log.Infoln("视频学习链接：" + links[n].Url)
-				learnTime := 70 + rand.Intn(30) + 10
+				learnTime := 60 + rand.Intn(10)
 				for i := 0; i < learnTime; i++ {
 					if c.IsQuit() {
 						return
@@ -248,14 +300,16 @@ func (c *Core) LearnVideo(cookies []Cookie) {
 					time.Sleep(1 * time.Second)
 				}
 				fmt.Println()
-				if score.Content["video"].CurrentScore >= score.Content["video"].MaxScore || score.Content["video_time"].CurrentScore >= score.Content["video_time"].MaxScore {
+				score, _ = GetUserScore(user.ToCookies())
+				if score.Content["video"].CurrentScore >= score.Content["video"].MaxScore && score.Content["video_time"].CurrentScore >= score.Content["video_time"].MaxScore {
 					log.Infoln("检测到本次视频学习分数已满，退出学习")
 					break
 				}
-				score, _ = GetUserScore(cookies)
+
 				tryCount++
 			} else {
 				log.Errorln("视频学习出现异常，稍后可重新学习")
+				return
 			}
 		}
 	} else {
